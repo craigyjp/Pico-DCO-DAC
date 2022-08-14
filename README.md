@@ -10,8 +10,6 @@ This repository contains source code, schematics for a digitally controlled osci
 - Up to six voices
 - Voice stacking
 - Detuning of voices
-- Separate gate signal
-- DIN MIDI serial input
 - USB MIDI input
 - MIDI pitch bend
 - Portamento with adjustable speed
