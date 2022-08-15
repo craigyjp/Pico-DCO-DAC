@@ -37,15 +37,16 @@ uint32_t sample_data = 0b00000000000000000000000000000000;
 
 uint8_t rs[4];
 uint8_t cv[4];
-uint8_t oct1 = 1;
-uint8_t oct2 = 1;
-uint8_t oct = 0;
+uint8_t OCT1 = 1;
+uint8_t OCT2 = 1;
+float OCT = 0;
 
 uint STACK_VOICES = 1;
 float DETUNE = 0.0f, LAST_DETUNE = 0.0f;
 float FM_VALUE = 0.0f;  
 float LAST_FM = 0.0f;
-float sfAdj[6] = {1.02f, 1.00f, 1.00f, 1.00f, 1.00f, 1.01f};
+float LAST_OCT = 1.0f;
+float sfAdj[6] = {1.01f, 1.00f, 1.00f, 1.00f, 1.00f, 1.01f};
 #define NOTE_SF 276.60f
 
 // Scale factor for FM. Controls how intense the effect is at maximum input voltage.
@@ -357,17 +358,17 @@ void serial_midi_task() {
 void note_on(uint8_t note, uint8_t velocity) {
     if (STACK_VOICES < 2) {
         for (int i=0; i<NUM_VOICES; i++) {
-            if (VOICE_NOTES[i] == (note + oct -12) && VOICE_GATE[i]) return; // note already playing
+            if (VOICE_NOTES[i] == (note) && VOICE_GATE[i]) return; // note already playing
         }
     }
     for (int i=0; i<STACK_VOICES; i++) {
         uint8_t voice_num = get_free_voice();
 
         VOICES[voice_num] = board_millis();
-        VOICE_NOTES[voice_num] = (note + oct -12);
+        VOICE_NOTES[voice_num] = (note);
         VOICE_GATE[voice_num] = 1;
 
-        float freq = get_freq_from_midi_note(note + oct -12) * (1 + (pow(-1, i) * DETUNE));
+        float freq = get_freq_from_midi_note(note) * (1 + (pow(-1, i) * DETUNE));
         set_frequency(pio[VOICE_TO_PIO[voice_num]], VOICE_TO_SM[voice_num], freq);
         // amplitude adjustment
         pwm_set_chan_level(RANGE_PWM_SLICES[voice_num], pwm_gpio_to_channel(RANGE_PINS[voice_num]), (int)(DIV_COUNTER*(freq*0.00025f-1/(100*freq))));
@@ -377,10 +378,10 @@ void note_on(uint8_t note, uint8_t velocity) {
     }
     if (portamento) {
         if (portamento_start == 0) {
-            portamento_start = (note + oct -12);
+            portamento_start = (note);
             portamento_cur_freq = 0.0f;
         } else {
-            portamento_stop = (note + oct -12);
+            portamento_stop = (note);
         }
     }
     last_midi_pitch_bend = 0;
@@ -389,7 +390,7 @@ void note_on(uint8_t note, uint8_t velocity) {
 void note_off(uint8_t note) {
     // gate off
     for (int i=0; i<NUM_VOICES; i++) {
-        if (VOICE_NOTES[i] == (note + oct -12)) {
+        if (VOICE_NOTES[i] == (note)) {
             //gpio_put(GATE_PINS[i], 0);
 
             //VOICE_NOTES[i] = 0;
@@ -397,7 +398,7 @@ void note_off(uint8_t note) {
             VOICE_GATE[i] = 0;
         }
     }
-    if (portamento_stop == (note + oct -12)) {
+    if (portamento_stop == (note)) {
         portamento_start = portamento_stop;
         portamento_stop = 0;
         portamento_cur_freq = 0.0f;
@@ -433,18 +434,19 @@ uint8_t get_free_voice() {
 }
 
 void voice_task() {
-    if (midi_pitch_bend != last_midi_pitch_bend || DETUNE != LAST_DETUNE || portamento || FM_VALUE != LAST_FM) {
+    if (midi_pitch_bend != last_midi_pitch_bend || DETUNE != LAST_DETUNE || portamento || FM_VALUE != LAST_FM || OCT != LAST_OCT) {
 
         last_midi_pitch_bend = midi_pitch_bend;
         LAST_DETUNE = DETUNE;
         LAST_FM = FM_VALUE;
+        LAST_OCT = OCT;
 
         for (int i=0; i<NUM_VOICES; i++) {
 
             float freq = get_freq_from_midi_note(VOICE_NOTES[i]) * (1 + (pow(-1, i) * DETUNE));
 
             freq += FM_VALUE * FM_INTENSITY; // Add linear frequency modulation
-            
+            freq = (freq * OCT); // octave switch
             freq = freq-(freq*((0x2000-midi_pitch_bend)/67000.0f));
             set_frequency(pio[VOICE_TO_PIO[i]], VOICE_TO_SM[i], freq);
             pwm_set_chan_level(RANGE_PWM_SLICES[i], pwm_gpio_to_channel(RANGE_PINS[i]), (int)(DIV_COUNTER*(freq*0.00025f-1/(100*freq))));
@@ -484,17 +486,17 @@ void adc_task() {
 
 void octave_task(){
     #ifdef USE_OCTAVE_SWITCH
-    oct1 = gpio_get(PIN_OCT1);
-    oct2 = gpio_get(PIN_OCT2);
+    OCT1 = gpio_get(PIN_OCT1);
+    OCT2 = gpio_get(PIN_OCT2);
 
-    if ((oct1 >> 0) & (oct2 >> 0)){
-        oct = 12;
+    if ((OCT1 >> 0) & (OCT2 >> 0)){
+        OCT = 1;
     }
-    if ((oct1 == 0) & (oct2 >> 0)){
-        oct = 0;
+    if ((OCT1 == 0) & (OCT2 >> 0)){
+        OCT = 0.5;
     }
-    if ((oct2 == 0) & (oct1 >> 0)){
-        oct = 24;
+    if ((OCT2 == 0) & (OCT1 >> 0)){
+        OCT = 2;
     }
     #endif
 }
