@@ -25,6 +25,8 @@
 #define PIN_CS   5
 #define PIN_SCK  2
 
+#define VEL_DAC_SELECT 7
+
 #define PIN_OCT1  20
 #define PIN_OCT2  21
 
@@ -37,6 +39,7 @@ uint32_t sample_data = 0b00000000000000000000000000000000;
 
 uint8_t rs[4];
 uint8_t cv[4];
+uint8_t vel[4];
 uint8_t OCT1 = 1;
 uint8_t OCT2 = 1;
 float OCT = 0;
@@ -48,6 +51,7 @@ float LAST_FM = 0.0f;
 float LAST_OCT = 1.0f;
 float sfAdj[6] = {1.01f, 1.00f, 1.00f, 1.00f, 1.00f, 1.01f};
 #define NOTE_SF 276.60f
+#define VEL_SF 256
 
 // Scale factor for FM. Controls how intense the effect is at maximum input voltage.
 // Units: Hertz.
@@ -77,8 +81,11 @@ float portamento_cur_freq = 0.0f;
 void output_DAC(uint32_t sample_data);
 void DAC_reset();
 void cs_select();
+void vel_select();
 void cs_deselect();
+void vel_deselect();
 void zero_DACs();
+void output_VELOCITY();
 void init_sm(PIO pio, uint sm, uint offset, uint pin);
 void set_frequency(PIO pio, uint sm, float freq);
 float get_freq_from_midi_note(uint8_t note);
@@ -132,6 +139,11 @@ int main() {
     gpio_pull_up(PIN_OCT1);
     gpio_pull_up(PIN_OCT2);
 
+    // use more accurate PWM mode for buck-boost converter
+    gpio_init(VEL_DAC_SELECT);
+    gpio_set_dir(VEL_DAC_SELECT, GPIO_OUT);
+    gpio_put(VEL_DAC_SELECT, 1);
+
     // setup the SPI for the DAC
     spi_init(SPI_PORT, 1000 * 1000);
     spi_set_format(SPI_PORT, 8, 1, 0, SPI_MSB_FIRST);
@@ -175,7 +187,7 @@ int main() {
         usb_midi_task();
         serial_midi_task();
         voice_task();
-        #if defined(USE_ADC_STACK_VOICES) || defined(USE_ADC_DETUNE) || defined(USE_ADC_FM)
+        #if defined(USE_ADC_STACK_VOICES) || defined(USE_ADC_DETUNE) || defined(USE_ADC_FM) || defined(USE_OCTAVE_SWITCH)
         adc_task();
         octave_task();
         #endif
@@ -189,9 +201,21 @@ void cs_select() {
     asm volatile("nop \n nop \n nop");
 }
 
+void vel_select() {
+    asm volatile("nop \n nop \n nop");
+    gpio_put(VEL_DAC_SELECT, 0);  // Active low
+    asm volatile("nop \n nop \n nop");
+}
+
 void cs_deselect() {
     asm volatile("nop \n nop \n nop");
     gpio_put(PIN_CS, 1);
+    asm volatile("nop \n nop \n nop");
+}
+
+void vel_deselect() {
+    asm volatile("nop \n nop \n nop");
+    gpio_put(VEL_DAC_SELECT, 1);
     asm volatile("nop \n nop \n nop");
 }
 
@@ -203,6 +227,13 @@ void DAC_reset() {
     rs[3] = (int_ref_on_flexible_mode);
     spi_write_blocking(SPI_PORT, rs, 4);
   cs_deselect();
+  vel_select();
+    rs[0] = (int_ref_on_flexible_mode >> 24);
+    rs[1] = (int_ref_on_flexible_mode >> 16);
+    rs[2] = (int_ref_on_flexible_mode >> 8);
+    rs[3] = (int_ref_on_flexible_mode);
+    spi_write_blocking(SPI_PORT, rs, 4);
+  vel_deselect();
 }
 
 void zero_DACs(){
@@ -224,6 +255,16 @@ void output_DAC(uint32_t sample_data){
     cv[3] = (sample_data);
   spi_write_blocking(SPI_PORT, cv, 4);
   cs_deselect();
+}
+
+void output_VELOCITY(uint32_t sample_data){
+  vel_select();
+    vel[0] = (sample_data >> 24);
+    vel[1] = (sample_data >> 16);
+    vel[2] = (sample_data >> 8);
+    vel[3] = (sample_data);
+  spi_write_blocking(SPI_PORT, vel, 4);
+  vel_deselect();
 }
 
 void init_sm(PIO pio, uint sm, uint offset, uint pin) {
@@ -375,6 +416,9 @@ void note_on(uint8_t note, uint8_t velocity) {
         unsigned int mV = ((note) * NOTE_SF * sfAdj[voice_num] + 0.5);
         sample_data = ((DACS[voice_num] & 0xFFF0000F) | ((mV & 0xFFFF) << 4));
         output_DAC(sample_data);
+        unsigned int velmV = ((velocity) * VEL_SF);
+        sample_data = ((DACS[voice_num] & 0xFFF0000F) | ((velmV & 0xFFFF) << 4));
+        output_VELOCITY(sample_data);
     }
     if (portamento) {
         if (portamento_start == 0) {
