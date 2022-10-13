@@ -487,7 +487,7 @@ void voice_task() {
 
         for (int i=0; i<NUM_VOICES; i++) {
 
-            float freq = get_freq_from_midi_note(VOICE_NOTES[i]) * (1 + (pow(-1, i) * DETUNE));
+            float freq = get_freq_from_midi_note(VOICE_NOTES[i]) * (1 - (pow(1, i) * DETUNE));
 
             freq += FM_VALUE * FM_INTENSITY; // Add linear frequency modulation
             freq = (freq * OCT); // octave switch
